@@ -44,7 +44,7 @@ async function loadBriefing() {
 
 const $=id=>document.getElementById(id),fmt=t=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'medium',timeStyle:'short'}).format(new Date(t)),num=(n,u='')=>typeof n==='number'&&Number.isFinite(n)?n.toFixed(1)+u:'미확인',escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const label=c=>({0:'맑음',1:'대체로 맑음',2:'구름 조금',3:'흐림',45:'안개',48:'착빙 안개',51:'약한 이슬비',53:'이슬비',55:'강한 이슬비',56:'어는 이슬비',57:'어는 이슬비',61:'약한 비',63:'비',65:'강한 비',66:'어는 비',67:'어는 비',71:'약한 눈',73:'눈',75:'강한 눈',77:'싸락눈',80:'약한 소나기',81:'소나기',82:'강한 소나기',85:'눈 소나기',86:'강한 눈 소나기',95:'뇌우',96:'우박 동반 뇌우',99:'강한 우박 동반 뇌우'}[c]||'상태 미확인');
-let warningData=null, selectedRegion='계룡시';
+let warningData=null, selectedRegion='전국';
 const regions={
  '계룡시':['계룡','충청남도','충남'],
  '서울특별시':['서울'], '부산광역시':['부산'], '대구광역시':['대구','군위'], '인천광역시':['인천','강화','옹진'], '광주광역시':['광주광역시','광주'], '대전광역시':['대전'], '울산광역시':['울산'], '세종특별자치시':['세종'],
@@ -60,80 +60,55 @@ const regions={
 };
 const warningColors={'강풍':'#157f89','풍랑':'#1760b5','호우':'#2946cf','대설':'#7655c2','건조':'#c85b12','폭염':'#c52e42','한파':'#338abb','태풍':'#9c369b','해일':'#12734f','황사':'#97721a','기타':'#646b78'};
 const kindOf=x=>Object.keys(warningColors).find(k=>x.kind.includes(k))||'기타';
-const seaTypes = ['앞바다', '먼바다', '구역 확인'];
-const seaBasins = ['서해', '동해', '남해', '제주', '기타 해상'];
-const seaMarkers = [
- ['서해', 105, 358], ['동해', 573, 307], ['남해', 484, 550],
- ['제주', 293, 568], ['기타 해상', 592, 552]
-];
 const isMarine = area => /앞\s*바다|먼\s*바다|해상|연안|해역/.test(area);
-function marineRegions(area) {
- const regions = [];
- let basin = '';
- for (const match of area.matchAll(/제주도?|서해|동해|남해|앞\s*바다|먼\s*바다|해상|연안|해역/g)) {
-  const term = match[0].replace(/\s/g, '');
-  if (/^(제주도?|서해|동해|남해)$/.test(term)) {
-   basin = term.startsWith('제주') ? '제주' : term;
-   continue;
-  }
-  regions.push((basin || '기타 해상') + ' ' +
-   (seaTypes.includes(term) ? term : '구역 확인'));
- }
- return regions.filter(name => !name.endsWith('구역 확인') ||
-  !regions.some(other => other !== name && other.startsWith(name.replace('구역 확인', ''))));
-}
+const isPreliminary = item => /예비/.test(item.level);
 function warningAreas(item) {
  // Split top-level areas while keeping parenthesized subdivisions together.
  const parts = String(item.area || '').match(/(?:[^,;，；()（）\n]+|\([^)]*\)|（[^）]*）)+/g) || [];
  return parts.map(part => part.trim()).filter(Boolean);
 }
-function warningsForSea(name) {
- return warningData?.status === 'ok' ? warningData.items.filter(item =>
-  warningAreas(item).some(area => isMarine(area) && marineRegions(area).includes(name))) : [];
-}
-function paintSeas(svg, ok) {
- svg.querySelector('#marine-markers')?.remove();
- const ns = 'http://www.w3.org/2000/svg';
- function add(parent, tag, attrs, text) {
-  const node = document.createElementNS(ns, tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-  if (text) node.textContent = text;
-  parent.append(node);
-  return node;
+let mapMode = 'active';
+
+function renderOfficialMap() {
+ const panel = $('officialMap');
+ if (!panel) return;
+ const showingOfficial = mapMode !== 'regions';
+ panel.hidden = !showingOfficial;
+ $('map').hidden = showingOfficial;
+ $('mapLegend').hidden = showingOfficial;
+ $('mapStatus').hidden = showingOfficial;
+ document.querySelectorAll('[data-map-mode]').forEach(button =>
+  button.setAttribute('aria-pressed', String(button.dataset.mapMode === mapMode)));
+ if (!showingOfficial) return;
+ panel.replaceChildren();
+ const source = document.createElement('a');
+ source.href = 'https://www.weather.go.kr/w/special-report/overall.do';
+ source.target = '_blank';
+ source.rel = 'noopener';
+ source.textContent = '기상청 특보 원문 보기 ↗';
+ const url = warningData?.maps?.[mapMode];
+ if (!url || !/^https:\/\/www\.weather\.go\.kr\/w\/repositary\/image\/wrn\/img\/KTKO(?:50|52)_\d{12}_\d+_\d+\.png$/.test(url)) {
+  panel.append(warningData ? '공식 지도 이미지를 확인할 수 없습니다. ' : '공식 지도 조회 중… ', source);
+  return;
  }
- const layer = add(svg, 'g', {id:'marine-markers', 'aria-label':'해상특보 위치 표시'});
- for (const [basin, x, y] of seaMarkers) {
-  const types = basin === '기타 해상' ? seaTypes.filter(type => warningsForSea(basin+' '+type).length) :
-   seaTypes.filter(type => type !== '구역 확인' || warningsForSea(basin+' '+type).length);
-  if (!types.length) continue;
-  add(layer, 'text', {x, y:y-10, 'font-size':17, 'font-weight':700, fill:'#164466'}, basin);
-  types.forEach((type, index) => {
-   const name = basin+' '+type;
-   const matches = warningsForSea(name);
-   const top = y + index * 37;
-   const active = matches.length > 0;
-   const kinds = [...new Set(matches.map(kindOf))];
-   const detail = ok ? (active ? matches.map(item => item.kind+' '+item.level).join(', ') : '관련 특보 미검출') : '특보 미확인';
-   const marker = add(layer, 'g', {'data-region':name, tabindex:0, role:'button',
-    'aria-label':name+' · '+detail, style:'cursor:pointer'});
-   add(marker, 'title', {}, name+' · '+detail);
-   add(marker, 'rect', {x, y:top, width:127, height:36, rx:6,
-    fill:active ? warningColors[kinds[0]] : '#e4f1fa', stroke:'#476e89', 'stroke-width':1.5});
-   add(marker, 'text', {x:x+63.5, y:top+23, 'text-anchor':'middle', 'font-size':16,
-    'font-weight':700, fill:active?'#fff':'#164466'}, type+(active?' '+matches.length+'건':''));
-  });
- }
+ const img = document.createElement('img');
+ img.alt = mapMode === 'active' ? '기상청 특보 발효현황 지도' : '기상청 예비특보 발표현황 지도';
+ img.style.cssText = 'display:block;width:100%;height:auto;margin-bottom:8px';
+ img.onerror = () => img.replaceWith(document.createTextNode('지도 이미지를 불러오지 못했습니다. '));
+ img.src = url;
+ panel.append(img, source);
 }
+
 function relatedWarnings(region) {
  return warningData?.status === 'ok' ? warningData.items.filter(item =>
-  warningAreas(item).some(area => !isMarine(area) &&
+  !isPreliminary(item) && warningAreas(item).some(area => !isMarine(area) &&
    (/전국/.test(area) || regions[region].some(n => area.includes(n))))) : [];
 }
 function paintMap(){
  const svg=document.querySelector('#map svg');
  $('mapLegend').innerHTML=Object.entries(warningColors).map(([kind,color])=>'<span class="legend-item"><i style="background:'+color+'"></i>'+kind+'</span>').join('')+'<span class="legend-item"><i style="background:#e4e8ef"></i>관련 항목 미검출</span>';
  const ok=warningData?.status==='ok';
- $('mapStatus').textContent=ok?'특보 종류별 색상 · 내륙 특보 중복은 줄무늬 · 해상 표시는 대표 위치이며 실제 구역 경계와 다릅니다.':'특보 자료 미확인 · 지도 색상으로 특보 유무를 판단하지 마세요.';
+ $('mapStatus').textContent=ok?'특보 종류별 색상 · 내륙 특보 중복은 줄무늬 · 바다 구역은 기상청 지도에서 확인하세요.':'특보 자료 미확인 · 지도 색상으로 특보 유무를 판단하지 마세요.';
  if(!svg)return;
  let defs=svg.querySelector('defs');if(defs)defs.remove();defs=document.createElementNS('http://www.w3.org/2000/svg','defs');svg.prepend(defs);
  svg.querySelectorAll('path[data-region]').forEach((path,i)=>{
@@ -145,13 +120,13 @@ function paintMap(){
  if(kinds.length>1){const ns='http://www.w3.org/2000/svg',pattern=document.createElementNS(ns,'pattern');pattern.setAttribute('id','alert-'+i);pattern.setAttribute('patternUnits','userSpaceOnUse');pattern.setAttribute('width',kinds.length*9);pattern.setAttribute('height',kinds.length*9);pattern.setAttribute('patternTransform','rotate(35)');kinds.forEach((k,j)=>{const r=document.createElementNS(ns,'rect');r.setAttribute('x',j*9);r.setAttribute('width',9);r.setAttribute('height',kinds.length*9);r.setAttribute('fill',warningColors[k]);pattern.append(r)});defs.append(pattern);fill='url(#alert-'+i+')'}
  path.style.fill=fill;const detail=ok?(matches.length?matches.map(x=>x.kind+' '+x.level).join(', '):'관련 특보 미검출'):'특보 미확인';path.setAttribute('aria-label',area+' · '+detail+' · 상세 보기');path.querySelector('title').textContent=area+' · '+detail;
  });
- paintSeas(svg, ok);
+
 }
 function gyeryongWarningState(data){
  if(!data)return {state:'loading',text:'계룡시 기상특보 조회 중…',note:'최신 자료를 확인하고 있습니다.'};
  if(data.status!=='ok'||!Array.isArray(data.items))return {state:'unknown',text:'계룡시 기상특보 확인 불가',note:'조회 실패 · 기상청 공식 현황을 확인하세요.'};
  const hits=[],uncertain=[];
- for(const item of data.items){
+ for(const item of data.items.filter(item => !isPreliminary(item))){
  for(const area of warningAreas(item).filter(area => !isMarine(area))){
  if(!/계룡|충청남도|충남|전국/.test(area))continue;
  if(/계룡/.test(area)){if(/제외|해제/.test(area))uncertain.push(item);else hits.push(item);continue}
@@ -169,20 +144,40 @@ function renderGyeryongAlert(){const a=gyeryongWarningState(warningData);$('gyer
 function renderWarnings(){
  renderGyeryongAlert();
  paintMap();
- $('selectedRegion').textContent=selectedRegion+' 관련 특보';
+ renderOfficialMap();
+ $('selectedRegion').textContent=mapMode==='preliminary'?'전국 예비특보':selectedRegion+' 관련 발효 특보';
  document.querySelectorAll('[data-region]').forEach(el=>{const yes=el.dataset.region===selectedRegion;el.setAttribute('aria-pressed',String(yes));el.classList.toggle('selected',yes)});
  $('region').value=selectedRegion;
  if(!warningData){$('warnings').textContent='특보 조회 중 · 유무 미확인';return}
  if(warningData.status!=='ok'){$('warnings').innerHTML='<p class="error">특보 자동 조회 실패 · 특보 유무 미확인</p>';return}
- const items=selectedRegion==='전국'?warningData.items:Object.hasOwn(regions,selectedRegion)?relatedWarnings(selectedRegion):warningsForSea(selectedRegion);
+ const items=mapMode==='preliminary'?warningData.items.filter(isPreliminary):selectedRegion==='전국'?warningData.items.filter(x=>!isPreliminary(x)):relatedWarnings(selectedRegion);
  $('warnings').innerHTML='<p class="fine">관련 후보 '+items.length+'건 / 전국 표 '+warningData.items.length+'건</p>'+(items.length?items.map(x=>'<article class="warning"><h3>'+escape(x.kind+' '+x.level)+'</h3><p>'+escape(x.area)+'</p><p>발표 '+escape(x.announced)+' / 발효 '+escape(x.effective)+'</p>'+(x.end?'<p>'+escape(x.end)+'</p>':'')+'</article>').join(''):'<p>현재 특보 표에서 관련 명칭을 포함한 항목을 찾지 못했습니다. 특보 없음의 확정은 아니며 공식 현황을 확인하세요.</p>');
 }
-function selectRegion(name){if(!Object.hasOwn(regions,name) && !seaBasins.some(basin => seaTypes.some(type => name === basin+' '+type)))return;selectedRegion=name;renderWarnings()}
+function selectRegion(name){if(!Object.hasOwn(regions,name))return;if(mapMode==='preliminary')mapMode='active';selectedRegion=name;renderWarnings()}
 async function initMap(){
+ const controls = document.createElement('div');
+ controls.className = 'actions';
+ controls.setAttribute('aria-label', '특보 지도 선택');
+ const official = document.createElement('div');
+ official.id = 'officialMap';
+ for (const [mode, label] of [['active','기상청 발효 지도'], ['preliminary','기상청 예비특보 지도'], ['regions','시·도 선택 지도']]) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.mapMode = mode;
+  button.textContent = label;
+  button.onclick = () => {
+   mapMode = mode;
+   if (mode === 'active') selectedRegion = '전국';
+   renderWarnings();
+  };
+  controls.append(button);
+ }
+ $('mapLegend').before(controls, official);
  document.querySelectorAll('.warning-layout .fine').forEach(note => {
-  if (note.textContent.includes('해상 특보는 전국')) note.textContent = '해상 표지를 누르면 앞바다·먼바다 특보 상세를 볼 수 있습니다. 표지는 대표 위치를 나타냅니다.';
+  if (note.textContent.includes('해상 특보는 전국')) note.textContent =
+   '앞바다·안쪽 먼바다·바깥 먼바다 구역은 기상청 지도에서 확인하세요.';
  });
- $('region').innerHTML=[...Object.keys(regions), ...seaBasins.flatMap(basin => seaTypes.map(type => basin+' '+type))].map(n=>'<option>'+n+'</option>').join('');$('region').onchange=e=>selectRegion(e.target.value);
+ $('region').innerHTML=Object.keys(regions).map(n=>'<option>'+n+'</option>').join('');$('region').onchange=e=>selectRegion(e.target.value);
  $('scopes').onclick=e=>{if(e.target.dataset.region)selectRegion(e.target.dataset.region)};
  try{const r=await fetch('assets/korea.svg');if(!r.ok)throw Error();$('map').innerHTML=await r.text();$('map').onclick=e=>{const p=e.target.closest('[data-region]');if(p)selectRegion(p.dataset.region)};$('map').onkeydown=e=>{if(['Enter',' '].includes(e.key)&&e.target.dataset.region){e.preventDefault();selectRegion(e.target.dataset.region)}}}catch{$('map').textContent='지도를 불러오지 못했습니다. 아래 지역 선택을 사용하세요.'}renderWarnings();
 }

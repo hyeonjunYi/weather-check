@@ -2,17 +2,37 @@ const WEATHER='https://api.open-meteo.com/v1/forecast?latitude=36.274&longitude=
 const WARN='https://www.weather.go.kr/w/wnuri-fct2021/weather/warning.do';
 const OFFICIAL='https://www.weather.go.kr/w/special-report/overall.do';
 function text(s){return s.replace(/<!--[\s\S]*?-->/g,'').replace(/<[^>]*>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/\s+/g,' ').trim()}
-function parseWarnings(html){
+function parseMaps(html){
+ // KMA publishes distinct image products for active and preliminary warnings.
+ const maps = {};
+ for (const tag of html.matchAll(/<img\b[^>]*>/gi)) {
+  const path = tag[0].match(/\/w\/repositary\/image\/wrn\/img\/KTKO(50|52)_\d{12}_\d+_\d+\.png/i);
+  if (!path) continue;
+  const type = path[1] === '50' ? 'active' : 'preliminary';
+  if (!maps[type]) maps[type] = new URL(path[0], OFFICIAL).href;
+ }
+ return maps;
+}
+function parseWarnings(html) {
+ const maps = parseMaps(html);
  const table=html.match(/<table\b[^>]*id=["']current-warnings["'][^>]*>([\s\S]*?)<\/table>/i);
- if(!table)throw Error('기상청 현황 표 형식 확인 불가');
+ if(!table)return {status:'error',items:[],maps,source:OFFICIAL};
  const rows=[...table[1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m=>[...m[1].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map(v=>text(v[1]))).filter(r=>r.length>=5);
- if(!rows.length&&!/없|발효.*않/.test(text(table[1])))throw Error('특보 표 내용 확인 불가');
+ if(!rows.length&&!/없|발효.*않/.test(text(table[1])))return {status:'error',items:[],maps,source:OFFICIAL};
  const items=rows.map(r=>({kind:r[0],level:r[1],area:r[2],announced:r[3],effective:r[4],end:r[5]||''}));
- return {status:'ok',items,nationalCount:items.length,source:OFFICIAL};
+ return {status:'ok',items,nationalCount:items.length,maps,source:OFFICIAL};
 }
 async function get(url){const r=await fetch(url,{signal:AbortSignal.timeout(15000),headers:{'User-Agent':'Gyeryong-Weather-Briefing/1.0'}});if(!r.ok)throw Error('원본 응답 '+r.status);return r}
 exports.handler=async()=>{
- const [w,a]=await Promise.allSettled([get(WEATHER).then(r=>r.json()).then(d=>{if(!d.current||!d.daily||!d.hourly)throw Error('날씨 응답 형식 오류');return d}),get(WARN).then(r=>r.text()).then(parseWarnings)]);
+ const [w,a]=await Promise.allSettled([get(WEATHER).then(r=>r.json()).then(d=>{if(!d.current||!d.daily||!d.hourly)throw Error('날씨 응답 형식 오류');return d}),get(WARN).then(r=>r.text()).then(parseWarnings).then(async warnings => {
+  if (!warnings.maps.active || !warnings.maps.preliminary) {
+   try {
+    const response = await get('https://www.weather.go.kr/w/wnuri-fct/weather/warning.do');
+    warnings.maps = {...parseMaps(await response.text()), ...warnings.maps};
+   } catch {} // Keep the warning table usable if the map source fails.
+  }
+  return warnings;
+ })]);
  const body={retrievedAt:new Date().toISOString(),location:{name:'계룡시',latitude:36.274,longitude:127.249},weather:w.status==='fulfilled'?{status:'ok',data:w.value}:{status:'error',message:'날씨를 가져오지 못했습니다. 다시 조회해 주세요.'},warnings:a.status==='fulfilled'?a.value:{status:'error',items:[],source:OFFICIAL,message:'특보 자동 조회 실패 · 특보 없음으로 판단할 수 없습니다.'}};
  return {statusCode:200,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'},body:JSON.stringify(body)};
 };
