@@ -4,9 +4,13 @@ const koreaDate = () => new Intl.DateTimeFormat('sv-SE', {
 }).format(new Date());
 
 async function requestJson(url) {
- const response = await fetch(url, {cache:'no-store', signal:AbortSignal.timeout(10000)});
- if (!response.ok) throw new Error('HTTP ' + response.status);
- return response.json();
+ const controller = new AbortController();
+ const timeout = setTimeout(() => controller.abort(), 8000);
+ try {
+  const response = await fetch(url, {cache:'no-store', signal:controller.signal});
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return await response.json();
+ } finally { clearTimeout(timeout); }
 }
 
 async function getSnapshot(name) {
@@ -26,21 +30,6 @@ function isTodayWeather(data) {
   Array.isArray(data.hourly?.time);
 }
 
-async function loadBriefing() {
- const [live, published] = await Promise.allSettled([
-  requestJson(WEATHER_URL),
-  getSnapshot('briefing')
- ]);
- const snapshot = published.status === 'fulfilled' ? published.value : null;
- const warnings = snapshot?.warnings || {status:'error',items:[]};
- if (live.status === 'fulfilled' && isTodayWeather(live.value)) {
-  return {warnings, weather:{status:'ok',data:live.value}, weatherLabel:'날씨 직접 조회'};
- }
- if (snapshot?.weather?.status === 'ok' && isTodayWeather(snapshot.weather.data)) {
-  return {warnings, weather:snapshot.weather, weatherLabel:'날씨 게시 자료'};
- }
- return {warnings, weather:{status:'error'}, weatherLabel:'오늘 날씨 미확인'};
-}
 
 const $=id=>document.getElementById(id),fmt=t=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'medium',timeStyle:'short'}).format(new Date(t)),num=(n,u='')=>typeof n==='number'&&Number.isFinite(n)?n.toFixed(1)+u:'미확인',escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const label=c=>({0:'맑음',1:'대체로 맑음',2:'구름 조금',3:'흐림',45:'안개',48:'착빙 안개',51:'약한 이슬비',53:'이슬비',55:'강한 이슬비',56:'어는 이슬비',57:'어는 이슬비',61:'약한 비',63:'비',65:'강한 비',66:'어는 비',67:'어는 비',71:'약한 눈',73:'눈',75:'강한 눈',77:'싸락눈',80:'약한 소나기',81:'소나기',82:'강한 소나기',85:'눈 소나기',86:'강한 눈 소나기',95:'뇌우',96:'우박 동반 뇌우',99:'강한 우박 동반 뇌우'}[c]||'상태 미확인');
@@ -117,20 +106,97 @@ async function loadTides(){
 }
 
 $('date').textContent=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'full'}).format(new Date());
-async function load(){
- warningData=null;renderWarnings();$('refresh').disabled=true;$('status').textContent='최신 자료 조회 중…';$('warnings').textContent='기상특보 조회 중 · 이전 특보 상태를 사용하지 않습니다.';$('summary').value='조회 중';$('temperature').innerHTML='—<small>℃</small>';$('condition').textContent='조회 중';$('weatherTime').textContent='자료 기준시각 —';$('metrics').replaceChildren();$('hourly').innerHTML='<tr><td colspan="6">조회 중</td></tr>';
- try{const b=await loadBriefing();let lines=['계룡시 기상 상황 (참고용)','화면 조회: '+fmt(new Date())];
- if(b.weather.status==='ok'){const d=b.weather.data,c=d.current,k=c.time.slice(0,10),i=d.daily.time.indexOf(k),day=d.daily;const items=[['체감온도',num(c.apparent_temperature,'℃')],['습도',num(c.relative_humidity_2m,'%')],['풍속',num(c.wind_speed_10m,'m/s')],['순간풍속',num(c.wind_gusts_10m,'m/s')],['오늘 최저 / 최고',num(day.temperature_2m_min[i])+' / '+num(day.temperature_2m_max[i])+'℃'],['오늘 예상 강수',num(day.precipitation_sum[i],'mm')]];
+const WEATHER_CACHE = 'gyeryong-weather-v2';
+let weatherData = null, weatherLabel = '', warningLabel = '특보 조회 중', loading = false;
+let weatherLines = [];
+function renderWeather(d) {
+ const lines = [];
+ const c=d.current,k=c.time.slice(0,10),i=d.daily.time.indexOf(k),day=d.daily;const items=[['체감온도',num(c.apparent_temperature,'℃')],['습도',num(c.relative_humidity_2m,'%')],['풍속',num(c.wind_speed_10m,'m/s')],['순간풍속',num(c.wind_gusts_10m,'m/s')],['오늘 최저 / 최고',num(day.temperature_2m_min[i])+' / '+num(day.temperature_2m_max[i])+'℃'],['오늘 예상 강수',num(day.precipitation_sum[i],'mm')]];
  $('temperature').innerHTML=escape(num(c.temperature_2m))+'<small>℃</small>';$('condition').textContent=label(c.weather_code);$('weatherTime').textContent='모델 자료 기준 '+c.time.replace('T',' ')+' KST';$('metrics').innerHTML=items.map(([t,v])=>'<div class="metric"><span>'+t+'</span><strong>'+escape(v)+'</strong></div>').join('');
  const times=d.hourly.time;let rows=[];times.forEach((t,j)=>{if(t.slice(0,10)===k)rows.push('<tr><td>'+escape(t.slice(11))+'</td><td>'+escape(label(d.hourly.weather_code?.[j]))+'</td><td>'+num(d.hourly.temperature_2m[j],'℃')+'</td><td>'+num(d.hourly.precipitation_probability[j],'%')+'</td><td>'+num(d.hourly.precipitation[j],'mm')+'</td><td>'+num(d.hourly.wind_speed_10m[j],'m/s')+'</td></tr>')});$('hourly').innerHTML=rows.join('')||'<tr><td colspan="6">오늘 시간대 자료 없음</td></tr>';lines.push('날씨: '+label(c.weather_code)+', '+num(c.temperature_2m,'℃')+', 습도 '+num(c.relative_humidity_2m,'%')+', 풍속 '+num(c.wind_speed_10m,'m/s'),'날씨 기준: '+c.time+' KST / Open-Meteo 모델 기반');
- }else{$('condition').textContent='날씨 조회 실패';$('hourly').innerHTML='<tr><td colspan="6">날씨 조회 실패</td></tr>';lines.push('날씨: 조회 실패');}
- const a=b.warnings;warningData=a;renderWarnings();lines.push('기상특보 조회: '+(a.status==='ok'?'전국 현재 특보 표 '+a.items.length+'건 수신':'조회 실패 · 유무 미확인'));
- lines.push('특보 원문: https://www.weather.go.kr/w/special-report/overall.do');$('summary').value=lines.join('\n');$('status').textContent=b.weatherLabel+' / '+(a.status==='ok'?'특보 표 수신':'특보 실패');
- }catch(e){warningData={status:'error'};renderWarnings();$('status').textContent='자료 조회 실패 · 공식 원문을 확인하세요.';$('warnings').innerHTML='<p class="error">특보 유무 미확인 · 기상청 공식 현황을 확인하세요.</p>';$('condition').textContent='조회 실패';$('hourly').innerHTML='<tr><td colspan="6">날씨 조회 실패</td></tr>';$('summary').value='자료 조회 실패 · 기상특보 유무 미확인';}finally{$('refresh').disabled=false;}
+ weatherLines = lines;
+}
+function updateStatus() {
+ $('status').textContent = [weatherLabel, warningLabel].filter(Boolean).join(' / ');
+ $('summary').value = ['계룡시 기상 상황 (참고용)', ...weatherLines,
+  '날씨 조회 상태: '+weatherLabel, '기상특보: '+warningLabel,
+  '특보 원문: https://www.weather.go.kr/w/special-report/overall.do'].join('\n');
+}
+function acceptWeather(data, source) {
+ if (!isTodayWeather(data)) return false;
+ // A delayed posted response must not overwrite a newer model timestamp.
+ if (weatherData && data.current.time < weatherData.current.time) return false;
+ weatherData = data;
+ renderWeather(data);
+ weatherLabel = source;
+ try { localStorage.setItem(WEATHER_CACHE, JSON.stringify(data)); } catch {}
+ updateStatus();
+ return true;
+}
+function clearWeather(message) {
+ weatherData = null; weatherLines = ['날씨: '+message];
+ $('temperature').innerHTML='—<small>℃</small>';
+ $('condition').textContent=message;
+ $('weatherTime').textContent='자료 기준시각 —';
+ $('metrics').replaceChildren();
+ $('hourly').innerHTML='<tr><td colspan="6">'+escape(message)+'</td></tr>';
+}
+async function load() {
+ if (loading) return;
+ loading = true;
+ $('refresh').disabled = true;
+ $('refresh').textContent = '조회 중';
+ $('date').textContent=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'full'}).format(new Date());
+ if (weatherData && !isTodayWeather(weatherData)) clearWeather('오늘 날씨 조회 중');
+ if (!weatherData) {
+  try { acceptWeather(JSON.parse(localStorage.getItem(WEATHER_CACHE)), '이전 날씨 표시 · 최신 조회 중'); } catch {}
+ }
+ if (!weatherData) clearWeather('조회 중');
+ weatherLabel = weatherData ? '이전 날씨 표시 · 최신 조회 중' : '날씨 조회 중';
+ warningData = null; warningLabel = '특보 조회 중'; renderWarnings(); updateStatus();
+ let liveOK = false, postedOK = false, liveError = '';
+ const postedTask = (async () => {
+  try {
+   const snapshot = await getSnapshot('briefing');
+   warningData = snapshot.warnings || {status:'error',items:[]};
+   warningLabel = warningData.status === 'ok'
+    ? '특보 표 수신 · 수집 '+fmt(snapshot.retrievedAt) : '특보 확인 불가';
+   renderWarnings();
+   if (!liveOK && snapshot.weather?.status === 'ok') {
+    postedOK = acceptWeather(snapshot.weather.data, '게시 날씨 표시 · 직접 조회 중');
+   }
+  } catch (error) {
+   warningData = {status:'error',items:[]};
+   warningLabel = '특보 확인 불가 · '+error.message;
+   renderWarnings();
+  }
+  updateStatus();
+ })();
+ const liveTask = (async () => {
+  try {
+   const data = await requestJson(WEATHER_URL);
+   if (!isTodayWeather(data)) throw new Error('오늘 날씨 응답 형식 확인 필요');
+   liveOK = acceptWeather(data, '날씨 직접 조회 완료');
+  } catch (error) {
+   liveError = error.name === 'AbortError' ? '응답 대기시간 초과' : error.message;
+  }
+  updateStatus();
+ })();
+ try {
+  // Each task renders immediately; wait here only to unlock the refresh button.
+  await Promise.allSettled([postedTask, liveTask]);
+  if (!liveOK) {
+   if (weatherData) weatherLabel = (postedOK ? '게시 날씨 사용' : '이전 날씨 유지')+' · 직접 조회 실패'+(liveError ? ' ('+liveError+')' : '');
+   else { clearWeather('날씨 조회 실패'); weatherLabel = '오늘 날씨 미확인'+(liveError ? ' · '+liveError : ''); }
+  }
+  updateStatus();
+ } finally {
+  loading = false; $('refresh').disabled = false; $('refresh').textContent = '지금 조회하기';
+ }
 }
 $('refresh').textContent='지금 조회하기';
 const notice = document.querySelector('main > .notice');
-if (notice) notice.textContent='날씨는 Open-Meteo에서 직접 조회하며, 실패하면 최근 게시 자료를 사용합니다. 기상특보·산불경보·조석은 GitHub에 게시된 자료입니다.';
+if (notice) notice.textContent='날씨는 Open-Meteo에서 직접 조회합니다. 조회 중이거나 실패하면 오늘의 이전 자료를 기준시각과 함께 표시합니다. 기상특보·산불경보·조석은 GitHub에 게시된 자료입니다.';
 $('refresh').onclick=()=>{load();loadTides();loadForest()};$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('summary').value);$('copy').textContent='복사 완료';setTimeout(()=>$('copy').textContent='요약 복사',1500)}catch{$('summary').focus();$('summary').select();$('status').textContent='요약문을 선택했습니다. Ctrl+C로 복사하세요.'}};load();loadTides();loadForest();
 
 $('tideRefresh').onclick=loadTides;
