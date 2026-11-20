@@ -3,13 +3,21 @@ const WARN='https://www.weather.go.kr/w/wnuri-fct2021/weather/warning.do';
 const OFFICIAL='https://www.weather.go.kr/w/special-report/overall.do';
 function text(s){return s.replace(/<!--[\s\S]*?-->/g,'').replace(/<[^>]*>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/\s+/g,' ').trim()}
 function parseMaps(html){
- // KMA publishes distinct image products for active and preliminary warnings.
  const maps = {};
  for (const tag of html.matchAll(/<img\b[^>]*>/gi)) {
-  const path = tag[0].match(/\/w\/repositary\/image\/wrn\/img\/KTKO(50|52)_\d{12}_\d+_\d+\.png/i);
-  if (!path) continue;
-  const type = path[1] === '50' ? 'active' : 'preliminary';
-  if (!maps[type]) maps[type] = new URL(path[0], OFFICIAL).href;
+  const src = tag[0].match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+  if (!src) continue;
+  let url;
+  try { url = new URL(src[1].replace(/&amp;/g, '&'), OFFICIAL); } catch { continue; }
+  if (url.origin !== 'https://www.weather.go.kr') continue;
+  // KMA may append a servlet session ID. Retain only the actual PNG path.
+  const path = url.pathname.replace(/;jsessionid=[^/;]*/i, '');
+  const match = path.match(/^\/w\/repositary\/image\/wrn\/img\/KTKO(50|52)_\d{12}_\d+_\d+(b?)\.png$/i);
+  if (!match) continue;
+  const alt = tag[0].match(/\balt\s*=\s*["']([^"']*)["']/i)?.[1] || '';
+  const preliminary = /예비특보/.test(alt) || match[1] === '52' || match[2].toLowerCase() === 'b';
+  const type = preliminary ? 'preliminary' : 'active';
+  if (!maps[type]) maps[type] = new URL(path, OFFICIAL).href;
  }
  return maps;
 }
@@ -37,3 +45,5 @@ exports.handler=async()=>{
  return {statusCode:200,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'},body:JSON.stringify(body)};
 };
 exports.parseWarnings=parseWarnings;
+
+exports.parseMaps=parseMaps;

@@ -51,8 +51,8 @@ function renderOfficialMap() {
  source.rel = 'noopener';
  source.textContent = '기상청 특보 원문 보기 ↗';
  const url = warningData?.maps?.preliminary;
- if (!url || !/^https:\/\/www\.weather\.go\.kr\/w\/repositary\/image\/wrn\/img\/KTKO52_\d{12}_\d+_\d+\.png$/.test(url)) {
-  panel.append(warningData ? '공식 지도 이미지를 확인할 수 없습니다. ' : '공식 지도 조회 중… ', source);
+ if (!url || !/^https:\/\/www\.weather\.go\.kr\/w\/repositary\/image\/wrn\/img\/(?:KTKO52_\d{12}_\d+_\d+|KTKO50_\d{12}_\d+_\d+b)\.png$/.test(url)) {
+  panel.append(warningData ? '예비특보 지도 주소를 수집하지 못했습니다. 기상청 원문을 확인하세요. ' : '공식 지도 조회 중… ', source);
   return;
  }
  const img = document.createElement('img');
