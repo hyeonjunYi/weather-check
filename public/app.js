@@ -50,13 +50,13 @@ function renderOfficialMap() {
  source.target = '_blank';
  source.rel = 'noopener';
  source.textContent = '기상청 특보 원문 보기 ↗';
- const url = warningData?.maps?.preliminary;
- if (!url || !/^https:\/\/www\.weather\.go\.kr\/w\/repositary\/image\/wrn\/img\/(?:KTKO52_\d{12}_\d+_\d+|KTKO50_\d{12}_\d+_\d+b)\.png$/.test(url)) {
-  panel.append(warningData ? '예비특보 지도 주소를 수집하지 못했습니다. 기상청 원문을 확인하세요. ' : '공식 지도 조회 중… ', source);
+ const url = warningData?.maps?.active;
+ if (!url || !/^https:\/\/www\.weather\.go\.kr\/w\/repositary\/image\/wrn\/img\/KTKO50_\d{12}_\d+_\d+\.png$/.test(url)) {
+  panel.append(warningData ? '특보 발효현황 지도 주소를 수집하지 못했습니다. 기상청 원문을 확인하세요. ' : '공식 지도 조회 중… ', source);
   return;
  }
  const img = document.createElement('img');
- img.alt = '기상청 예비특보 발표현황 지도';
+ img.alt = '기상청 특보 발효현황 지도';
  img.style.cssText = 'display:block;width:100%;max-width:560px;height:auto;margin:0 0 8px';
  img.onerror = () => img.replaceWith(document.createTextNode('지도 이미지를 불러오지 못했습니다. '));
  img.src = url;
@@ -94,8 +94,16 @@ function renderWarnings(){
   ' / 발효 ' + escape(item.effective) + '</p>' +
   (item.end ? '<p>' + escape(item.end) + '</p>' : '') + '</article>');
  $('warnings').innerHTML = items.length
-  ? '<p class="fine">발효 특보 ' + items.length + '건</p>' + cards.join('')
+  ? '<p class="fine">발효 특보 ' + items.length + '건</p>' + cards.slice(0,3).join('') + (cards.length > 3 ? '<div id="additionalWarnings" hidden>' + cards.slice(3).join('') + '</div><button type="button" class="secondary" id="warningsMore" aria-expanded="false" aria-controls="additionalWarnings">더보기 (전체 ' + cards.length + '건)</button>' : '')
   : '<p>수집한 특보 표에 발효 특보 항목이 없습니다.</p>';
+ const more = $('warningsMore');
+ if (more) more.onclick = () => {
+  const expanded = more.getAttribute('aria-expanded') === 'true';
+  $('additionalWarnings').hidden = expanded;
+  more.setAttribute('aria-expanded', String(!expanded));
+  more.textContent = expanded ? '더보기 (전체 ' + items.length + '건)' : '접기 (3건만 보기)';
+ };
+
 }
 async function loadTides(){
  $('tideRefresh').disabled=true;$('tideStatus').textContent='보령 기준 조석 조회 중…';$('tides').replaceChildren();
