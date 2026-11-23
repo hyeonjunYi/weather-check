@@ -115,11 +115,18 @@ function hourlyWindow(times, expanded, now = new Date()) {
  const {date,hour} = seoulClock(now);
  return times.map((time,index)=>({time,index})).filter(({time})=>time.slice(0,10)===date && (expanded || (Number(time.slice(11,13))>=hour-3 && Number(time.slice(11,13))<=hour+5)));
 }
+function roundedForecastTime(now = new Date()) {
+ const rounded = new Date(Math.floor((now.getTime()+1800000)/3600000)*3600000);
+ const clock=seoulClock(rounded);
+ return clock.date+'T'+String(clock.hour).padStart(2,'0')+':00';
+}
 function renderHourly(d, now = new Date()) {
+ const highlighted=roundedForecastTime(now);
  const rows = hourlyWindow(d.hourly.time, hourlyExpanded, now);
- $('hourly').innerHTML=rows.map(({time,index:j})=>'<tr><td>'+escape(time.slice(11))+'</td><td>'+escape(label(d.hourly.weather_code?.[j]))+'</td><td>'+num(d.hourly.temperature_2m?.[j],'℃')+'</td><td>'+num(d.hourly.precipitation_probability?.[j],'%')+'</td><td>'+num(d.hourly.precipitation?.[j],'mm')+'</td><td>'+num(d.hourly.wind_speed_10m?.[j],'m/s')+'</td></tr>').join('') || '<tr><td colspan="6">해당 시간대 자료 없음</td></tr>';
+ $('hourly').innerHTML=rows.map(({time,index:j})=>'<tr'+(time===highlighted?' class="current-hour" aria-current="time"':'')+'><td>'+escape(time.slice(11))+(time===highlighted?'<span class="current-hour-label">현재 시각</span>':'')+'</td><td>'+escape(label(d.hourly.weather_code?.[j]))+'</td><td>'+num(d.hourly.temperature_2m?.[j],'℃')+'</td><td>'+num(d.hourly.precipitation_probability?.[j],'%')+'</td><td>'+num(d.hourly.precipitation?.[j],'mm')+'</td><td>'+num(d.hourly.wind_speed_10m?.[j],'m/s')+'</td></tr>').join('') || '<tr><td colspan="6">해당 시간대 자료 없음</td></tr>';
  const {hour}=seoulClock(now);
  $('hourlyRange').textContent=hourlyExpanded ? '한국시간 기준 오늘 전체 예보입니다.' : '현재 시각 전 3시간부터 후 5시간까지 · '+String(Math.max(0,hour-3)).padStart(2,'0')+'~'+String(Math.min(23,hour+5)).padStart(2,'0')+'시 (오늘 범위)';
+ $('hourlyRange').textContent += highlighted.slice(0,10)===seoulClock(now).date ? ' · 현재 시각은 분을 반올림하여 강조합니다.' : ' · 반올림한 현재 시각은 내일 00시로 오늘 표에는 포함되지 않습니다.';
  $('hourlyToggle').hidden=false;
  $('hourlyToggle').setAttribute('aria-expanded',String(hourlyExpanded));
  $('hourlyToggle').textContent=hourlyExpanded ? '접기' : '더보기 · 오늘 전체';
@@ -257,3 +264,7 @@ async function loadForest(){
 setInterval(()=>{if(document.visibilityState==='visible')loadForest()},5*60*1000);
 
 $('hourlyToggle').onclick=()=>{hourlyExpanded=!hourlyExpanded;if(weatherData)renderHourly(weatherData)};
+
+// Keep the highlighted hour accurate while the page remains open.
+setInterval(()=>{if(weatherData && isTodayWeather(weatherData))renderHourly(weatherData)},30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden && weatherData && isTodayWeather(weatherData))renderHourly(weatherData)});

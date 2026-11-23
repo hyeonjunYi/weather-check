@@ -30,3 +30,7 @@ header { border-bottom: 3px solid #256ef4; }
 .author-credit { font-size:12px; line-height:1.6; margin-top:16px; }
 [hidden] { display:none !important; }
 @media print { .hourly-controls { display:none; } }
+
+tr.current-hour td { background:#ECF2FE; color:#063A74; font-weight:700; border-top:2px solid #256EF4; border-bottom:2px solid #256EF4; }
+.current-hour-label { display:block; width:max-content; margin-top:4px; padding:2px 6px; border-radius:4px; background:#256EF4; color:#fff; font-size:12px; }
+@media print { tr.current-hour td { print-color-adjust:exact; -webkit-print-color-adjust:exact; } }
