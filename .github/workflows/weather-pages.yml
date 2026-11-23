@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -18,7 +19,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -32,8 +33,58 @@ jobs:
       - uses: actions/configure-pages@v5
       - name: 공개 기상 자료 수집
         run: node scripts/collect.cjs
-      - uses: actions/upload-pages-artifact@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
         with:
           path: public
-      - uses: actions/deploy-pages@v4
+          name: weather-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify uploaded artifact is available
+        run: node scripts/wait-pages-artifact.cjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PAGES_ARTIFACT_NAME: weather-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Deploy Pages attempt 1
+        id: deploy1
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: '300000'
+          artifact_name: weather-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Wait before deployment retry 2
+        if: ${{ !cancelled() && steps.deploy1.outcome == 'failure' }}
+        run: sleep 20
+      - name: Deploy Pages attempt 2
+        id: deploy2
+        if: ${{ !cancelled() && steps.deploy1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: '300000'
+          artifact_name: weather-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Wait before deployment retry 3
+        if: ${{ !cancelled() && steps.deploy2.outcome == 'failure' }}
+        run: sleep 20
+      - name: Deploy Pages attempt 3
+        id: deploy3
+        if: ${{ !cancelled() && steps.deploy2.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: '300000'
+          artifact_name: weather-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Confirm deployment result
         id: deployment
+        if: ${{ !cancelled() }}
+        env:
+          FIRST: ${{ steps.deploy1.outcome }}
+          SECOND: ${{ steps.deploy2.outcome }}
+          THIRD: ${{ steps.deploy3.outcome }}
+          PAGE_URL: ${{ steps.deploy1.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy3.outputs.page_url }}
+        run: |
+          if [[ "$FIRST" == "success" || "$SECOND" == "success" || "$THIRD" == "success" ]]; then
+            echo "page_url=$PAGE_URL" >> "$GITHUB_OUTPUT"
+            echo "Pages deployment completed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Pages deployment did not succeed. Check artifact verification and deployment logs."
+            exit 1
+          fi
