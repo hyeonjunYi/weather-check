@@ -34,3 +34,9 @@ header { border-bottom: 3px solid #256ef4; }
 tr.current-hour td { background:#ECF2FE; color:#063A74; font-weight:700; border-top:2px solid #256EF4; border-bottom:2px solid #256EF4; }
 .current-hour-label { display:block; width:max-content; margin-top:4px; padding:2px 6px; border-radius:4px; background:#256EF4; color:#fff; font-size:12px; }
 @media print { tr.current-hour td { print-color-adjust:exact; -webkit-print-color-adjust:exact; } }
+
+.hourly-timeline { position:relative; padding-left:80px; }
+.hourly-track { position:absolute; left:70px; width:2px; background:#CDD1D5; }
+.hourly-marker { position:absolute; left:0; width:63px; text-align:center; padding:5px 2px; font-size:11px; line-height:1.4; font-weight:700; color:#fff; background:#256EF4; border-radius:4px; transform:translateY(-50%); z-index:1; font-variant-numeric:tabular-nums; }
+.hourly-marker::after { content:""; position:absolute; width:8px; height:8px; border:2px solid white; border-radius:50%; background:#256EF4; right:-14px; top:50%; transform:translateY(-50%); }
+@media (max-width:640px) { .hourly-timeline { padding-left:72px; } .hourly-track { left:64px; } .hourly-marker { width:57px; font-size:10px; } }
