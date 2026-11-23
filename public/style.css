@@ -25,3 +25,8 @@ header { border-bottom: 3px solid #256ef4; }
   .top-tools .actions { flex-wrap: wrap; }
   .actions button { min-height: 44px; }
 }
+
+.hourly-controls { margin-top:16px; text-align:center; }
+.author-credit { font-size:12px; line-height:1.6; margin-top:16px; }
+[hidden] { display:none !important; }
+@media print { .hourly-controls { display:none; } }

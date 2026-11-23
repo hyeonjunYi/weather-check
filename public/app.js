@@ -105,11 +105,46 @@ function renderWarnings(){
  };
 
 }
+let hourlyExpanded = false;
+function seoulClock(now = new Date()) {
+ const parts = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', hourCycle:'h23'}).formatToParts(now);
+ const value = key => parts.find(p=>p.type===key).value;
+ return {date:value('year')+'-'+value('month')+'-'+value('day'), hour:Number(value('hour'))};
+}
+function hourlyWindow(times, expanded, now = new Date()) {
+ const {date,hour} = seoulClock(now);
+ return times.map((time,index)=>({time,index})).filter(({time})=>time.slice(0,10)===date && (expanded || (Number(time.slice(11,13))>=hour-3 && Number(time.slice(11,13))<=hour+5)));
+}
+function renderHourly(d, now = new Date()) {
+ const rows = hourlyWindow(d.hourly.time, hourlyExpanded, now);
+ $('hourly').innerHTML=rows.map(({time,index:j})=>'<tr><td>'+escape(time.slice(11))+'</td><td>'+escape(label(d.hourly.weather_code?.[j]))+'</td><td>'+num(d.hourly.temperature_2m?.[j],'℃')+'</td><td>'+num(d.hourly.precipitation_probability?.[j],'%')+'</td><td>'+num(d.hourly.precipitation?.[j],'mm')+'</td><td>'+num(d.hourly.wind_speed_10m?.[j],'m/s')+'</td></tr>').join('') || '<tr><td colspan="6">해당 시간대 자료 없음</td></tr>';
+ const {hour}=seoulClock(now);
+ $('hourlyRange').textContent=hourlyExpanded ? '한국시간 기준 오늘 전체 예보입니다.' : '현재 시각 전 3시간부터 후 5시간까지 · '+String(Math.max(0,hour-3)).padStart(2,'0')+'~'+String(Math.min(23,hour+5)).padStart(2,'0')+'시 (오늘 범위)';
+ $('hourlyToggle').hidden=false;
+ $('hourlyToggle').setAttribute('aria-expanded',String(hourlyExpanded));
+ $('hourlyToggle').textContent=hourlyExpanded ? '접기' : '더보기 · 오늘 전체';
+}
+function tideName(raw) {
+ const names=['한물','두물','세물','네물','다섯물','여섯물','일곱물','여덟물','아홉물','열물','열한물','열두물','열세물'];
+ const aliases=['한매','두매','세매','네매','다섯매','여섯매','일곱매','여덟매','아홉매','열매','한꺽기','두꺽기','아조'];
+ const text=String(raw || '').trim();
+ const index=aliases.indexOf(text);
+ if(index>=0)return names[index];
+ const numeric=text.match(/^(\d{1,2})\s*(?:물|매)$/);
+ if(numeric && names[Number(numeric[1])-1])return names[Number(numeric[1])-1];
+ return text || '미확인';
+}
+function tideDates(now = new Date()) {
+ const today=seoulClock(now).date;
+ const tomorrow=new Date(Date.parse(today+'T00:00:00Z')+86400000).toISOString().slice(0,10);
+ return [today,tomorrow];
+}
+
 async function loadTides(){
  $('tideRefresh').disabled=true;$('tideStatus').textContent='보령 기준 조석 조회 중…';$('tides').replaceChildren();
  try{const t=await getSnapshot('tides');if(t.status!=='ok')throw Error();
  const events=(day,type)=>day.events.filter(e=>e.type===type).map(e=>escape(e.time)+' / '+escape(e.height)+'cm').join('<br>')||'해당일 예보 없음';
- $('tides').innerHTML=t.days.map(d=>'<tr><td>'+escape(d.date)+'</td><td>'+escape(d.mool)+'</td><td>'+events(d,'high')+'</td><td>'+events(d,'low')+'</td></tr>').join('');$('tideStatus').textContent='보령 기준 · '+fmt(t.retrievedAt)+' 조회';
+ $('tides').innerHTML=tideDates().map((date,i)=>{const d=t.days.find(day=>day.date===date);return '<tr><td>'+(i===0?'오늘':'내일')+'<br>'+escape(date)+'</td><td>'+escape(d?tideName(d.mool):'미확인')+'</td><td>'+(d?events(d,'high'):'자료 없음')+'</td><td>'+(d?events(d,'low'):'자료 없음')+'</td></tr>'}).join('');$('tideStatus').textContent='보령 기준 · '+fmt(t.retrievedAt)+' 조회';
  }catch{$('tideStatus').textContent='조석 자동 조회 실패 · 아래 공식 조석예보 또는 대천항 물때표를 확인하세요.'}finally{$('tideRefresh').disabled=false}
 }
 
@@ -121,7 +156,7 @@ function renderWeather(d) {
  const lines = [];
  const c=d.current,k=c.time.slice(0,10),i=d.daily.time.indexOf(k),day=d.daily;const items=[['체감온도',num(c.apparent_temperature,'℃')],['습도',num(c.relative_humidity_2m,'%')],['풍속',num(c.wind_speed_10m,'m/s')],['순간풍속',num(c.wind_gusts_10m,'m/s')],['오늘 최저 / 최고',num(day.temperature_2m_min[i])+' / '+num(day.temperature_2m_max[i])+'℃'],['오늘 예상 강수',num(day.precipitation_sum[i],'mm')]];
  $('temperature').innerHTML=escape(num(c.temperature_2m))+'<small>℃</small>';$('condition').textContent=label(c.weather_code);$('weatherTime').textContent='모델 자료 기준 '+c.time.replace('T',' ')+' KST';$('metrics').innerHTML=items.map(([t,v])=>'<div class="metric"><span>'+t+'</span><strong>'+escape(v)+'</strong></div>').join('');
- const times=d.hourly.time;let rows=[];times.forEach((t,j)=>{if(t.slice(0,10)===k)rows.push('<tr><td>'+escape(t.slice(11))+'</td><td>'+escape(label(d.hourly.weather_code?.[j]))+'</td><td>'+num(d.hourly.temperature_2m[j],'℃')+'</td><td>'+num(d.hourly.precipitation_probability[j],'%')+'</td><td>'+num(d.hourly.precipitation[j],'mm')+'</td><td>'+num(d.hourly.wind_speed_10m[j],'m/s')+'</td></tr>')});$('hourly').innerHTML=rows.join('')||'<tr><td colspan="6">오늘 시간대 자료 없음</td></tr>';lines.push('날씨: '+label(c.weather_code)+', '+num(c.temperature_2m,'℃')+', 습도 '+num(c.relative_humidity_2m,'%')+', 풍속 '+num(c.wind_speed_10m,'m/s'),'날씨 기준: '+c.time+' KST / Open-Meteo 모델 기반');
+ renderHourly(d);lines.push('날씨: '+label(c.weather_code)+', '+num(c.temperature_2m,'℃')+', 습도 '+num(c.relative_humidity_2m,'%')+', 풍속 '+num(c.wind_speed_10m,'m/s'),'날씨 기준: '+c.time+' KST / Open-Meteo 모델 기반');
  weatherLines = lines;
 }
 function updateStatus() {
@@ -142,6 +177,7 @@ function acceptWeather(data, source) {
  return true;
 }
 function clearWeather(message) {
+ hourlyExpanded=false; $('hourlyToggle').hidden=true; $('hourlyRange').textContent='';
  weatherData = null; weatherLines = ['날씨: '+message];
  $('temperature').innerHTML='—<small>℃</small>';
  $('condition').textContent=message;
@@ -219,3 +255,5 @@ async function loadForest(){
 }
 
 setInterval(()=>{if(document.visibilityState==='visible')loadForest()},5*60*1000);
+
+$('hourlyToggle').onclick=()=>{hourlyExpanded=!hourlyExpanded;if(weatherData)renderHourly(weatherData)};
